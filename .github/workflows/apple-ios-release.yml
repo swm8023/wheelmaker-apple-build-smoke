@@ -1,0 +1,84 @@
+name: WheelMaker iOS release
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Release Server session ID
+        type: string
+        required: true
+      version:
+        description: WheelMaker release version
+        type: string
+        required: true
+      source_sha:
+        description: Private WheelMaker source commit
+        type: string
+        required: true
+      return_key:
+        description: Per-release RSA public key (base64 DER)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 30
+    environment: apple-ios-release
+    env:
+      WM_JOB_ID: ${{ inputs.job_id }}
+      WM_SOURCE_SHA: ${{ inputs.source_sha }}
+      WM_VERSION: ${{ inputs.version }}
+      WM_TEAM_ID: ${{ vars.WM_APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare private workspace
+        run: |
+          work="$RUNNER_TEMP/wheelmaker-apple-$GITHUB_RUN_ID"
+          mkdir -m 700 "$work"
+          printf 'WM_WORK=%s\n' "$work" >>"$GITHUB_ENV"
+      - name: Check out the exact iOS source
+        env:
+          WM_IOS_DEPLOY_KEY: ${{ secrets.WM_IOS_DEPLOY_KEY }}
+        run: |
+          if ! bash signing/apple-ios-checkout.sh >>"$WM_WORK/diagnostics.log" 2>&1; then
+            echo 'Private iOS source checkout failed.'
+            exit 1
+          fi
+      - name: Archive and verify iOS
+        env:
+          WM_IOS_P12: ${{ secrets.WM_IOS_P12 }}
+          WM_IOS_P12_PASSWORD: ${{ secrets.WM_IOS_P12_PASSWORD }}
+          WM_IOS_PROFILE: ${{ secrets.WM_IOS_PROFILE }}
+        run: |
+          if ! bash signing/apple-ios-release.sh >>"$WM_WORK/diagnostics.log" 2>&1; then
+            echo 'iOS Ad Hoc archive, export, or verification failed.'
+            exit 1
+          fi
+      - name: Encrypt Apple result
+        if: ${{ !cancelled() }}
+        env:
+          WM_JOB_STATUS: ${{ job.status }}
+          WM_RETURN_KEY: ${{ inputs.return_key }}
+        run: node signing/apple-release-job.mjs seal-ios
+      - name: Upload encrypted result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: apple-result-${{ inputs.job_id }}
+          path: ${{ env.WM_WORK }}/apple-result.enc
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Clean private workspace
+        if: ${{ always() }}
+        run: |
+          if [[ "${WM_WORK:-}" == "$RUNNER_TEMP/wheelmaker-apple-$GITHUB_RUN_ID" ]]; then
+            rm -rf -- "$WM_WORK"
+          fi

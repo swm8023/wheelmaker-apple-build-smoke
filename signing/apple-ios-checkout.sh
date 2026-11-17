@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+set +x
+umask 077
+
+: "${WM_WORK:?}" "${WM_IOS_DEPLOY_KEY:?}"
+[[ "${WM_SOURCE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
+key="$WM_WORK/source-deploy-key"
+trap 'rm -f "$key"' EXIT
+printf '%s\n' "$WM_IOS_DEPLOY_KEY" >"$key"
+unset WM_IOS_DEPLOY_KEY
+cat >"$WM_WORK/github-known-hosts" <<'KEY'
+github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+KEY
+export GIT_SSH_COMMAND="ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile=\"$WM_WORK/github-known-hosts\" -i \"$key\""
+source="$WM_WORK/source"
+git clone --depth=1 --branch main --filter=blob:none --no-checkout git@github.com:swm8023/WheelMaker.git "$source"
+git -C "$source" sparse-checkout set mobile/ios
+git -C "$source" fetch --depth=1 --filter=blob:none origin "$WM_SOURCE_SHA"
+git -C "$source" checkout --detach "$WM_SOURCE_SHA"
+[[ "$(git -C "$source" rev-parse HEAD)" == "$WM_SOURCE_SHA" ]]
+test -f "$source/mobile/ios/WheelMaker.xcodeproj/project.pbxproj"

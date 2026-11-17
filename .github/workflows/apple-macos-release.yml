@@ -1,0 +1,100 @@
+name: WheelMaker macOS release
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Release Server session ID
+        type: string
+        required: true
+      version:
+        description: WheelMaker release version
+        type: string
+        required: true
+      source_sha:
+        description: Private WheelMaker source commit
+        type: string
+        required: true
+      return_key:
+        description: Per-release RSA public key (base64 DER)
+        type: string
+        required: true
+      asset_id:
+        description: Encrypted staging release asset ID
+        type: string
+        required: true
+      input_sha:
+        description: SHA-256 digest of the encrypted Mac input
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: apple-macos-release
+    env:
+      WM_JOB_ID: ${{ inputs.job_id }}
+      WM_SOURCE_SHA: ${{ inputs.source_sha }}
+      WM_VERSION: ${{ inputs.version }}
+      WM_TEAM_ID: ${{ vars.WM_APPLE_TEAM_ID }}
+      WM_INPUT_SHA: ${{ inputs.input_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare private workspace
+        run: |
+          work="$RUNNER_TEMP/wheelmaker-apple-$GITHUB_RUN_ID"
+          mkdir -m 700 "$work"
+          printf 'WM_WORK=%s\n' "$work" >>"$GITHUB_ENV"
+      - name: Download encrypted input
+        env:
+          WM_ASSET_ID: ${{ inputs.asset_id }}
+          WM_STAGING_REPOSITORY: ${{ vars.WM_STAGING_REPOSITORY }}
+          WM_STAGING_TOKEN: ${{ secrets.WM_STAGING_READ_TOKEN }}
+          WM_MAC_INPUT_KEY: ${{ secrets.WM_MAC_INPUT_PRIVATE_KEY }}
+        run: node signing/apple-release-job.mjs download-mac
+      - name: Sign macOS binaries
+        env:
+          WM_MAC_P12: ${{ secrets.WM_MAC_P12 }}
+          WM_MAC_P12_PASSWORD: ${{ secrets.WM_MAC_P12_PASSWORD }}
+        run: |
+          if ! bash signing/apple-macos-release.sh sign >>"$WM_WORK/diagnostics.log" 2>&1; then
+            echo 'Developer ID signing or signature verification failed.'
+            exit 1
+          fi
+      - name: Notarize macOS binaries
+        env:
+          WM_NOTARY_APPLE_ID: ${{ secrets.WM_NOTARY_APPLE_ID }}
+          WM_NOTARY_PASSWORD: ${{ secrets.WM_NOTARY_PASSWORD }}
+        run: |
+          if ! bash signing/apple-macos-release.sh notarize >>"$WM_WORK/diagnostics.log" 2>&1; then
+            echo 'Apple notarization could not be completed.'
+            exit 1
+          fi
+      - name: Encrypt Apple result
+        if: ${{ !cancelled() }}
+        env:
+          WM_JOB_STATUS: ${{ job.status }}
+          WM_RETURN_KEY: ${{ inputs.return_key }}
+        run: node signing/apple-release-job.mjs seal-mac
+      - name: Upload encrypted result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: apple-result-${{ inputs.job_id }}
+          path: ${{ env.WM_WORK }}/apple-result.enc
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Clean private workspace
+        if: ${{ always() }}
+        run: |
+          if [[ "${WM_WORK:-}" == "$RUNNER_TEMP/wheelmaker-apple-$GITHUB_RUN_ID" ]]; then
+            rm -rf -- "$WM_WORK"
+          fi
