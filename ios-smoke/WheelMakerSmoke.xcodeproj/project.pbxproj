@@ -1,0 +1,46 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {};
+    objectVersion = 56;
+    objects = {
+        D9F111000000000000000001 = {isa = PBXBuildFile; fileRef = D9F111000000000000000002;};
+        D9F111000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeApp.swift; sourceTree = "<group>";};
+        D9F111000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.application; path = WheelMakerSmoke.app; sourceTree = BUILT_PRODUCTS_DIR;};
+        D9F111000000000000000004 = {isa = PBXGroup; children = (D9F111000000000000000002, D9F111000000000000000005,); sourceTree = "<group>";};
+        D9F111000000000000000005 = {isa = PBXGroup; children = (D9F111000000000000000003,); name = Products; sourceTree = "<group>";};
+        D9F111000000000000000006 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D9F111000000000000000001,); runOnlyForDeploymentPostprocessing = 0;};
+        D9F111000000000000000007 = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = D9F11100000000000000000E;
+            buildPhases = (D9F111000000000000000006,);
+            buildRules = ();
+            dependencies = ();
+            name = WheelMakerSmoke;
+            productName = WheelMakerSmoke;
+            productReference = D9F111000000000000000003;
+            productType = "com.apple.product-type.application";
+        };
+        D9F111000000000000000008 = {
+            isa = PBXProject;
+            attributes = {LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600;};
+            buildConfigurationList = D9F11100000000000000000D;
+            compatibilityVersion = "Xcode 14.0";
+            developmentRegion = en;
+            hasScannedForEncodings = 0;
+            knownRegions = (en, Base,);
+            mainGroup = D9F111000000000000000004;
+            productRefGroup = D9F111000000000000000005;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (D9F111000000000000000007,);
+        };
+        D9F111000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";  SWIFT_OPTIMIZATION_LEVEL = "-Onone";}; name = Debug;};
+        D9F11100000000000000000A = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";  SWIFT_COMPILATION_MODE = wholemodule;}; name = Release;};
+        D9F11100000000000000000B = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "WheelMaker Smoke"; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.wheelmaker.ios.smoke; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = NO; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-Onone";}; name = Debug;};
+        D9F11100000000000000000C = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "WheelMaker Smoke"; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.wheelmaker.ios.smoke; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = NO; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_COMPILATION_MODE = wholemodule;}; name = Release;};
+        D9F11100000000000000000D = {isa = XCConfigurationList; buildConfigurations = (D9F111000000000000000009, D9F11100000000000000000A,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+        D9F11100000000000000000E = {isa = XCConfigurationList; buildConfigurations = (D9F11100000000000000000B, D9F11100000000000000000C,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+    };
+    rootObject = D9F111000000000000000008;
+}

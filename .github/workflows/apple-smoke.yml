@@ -1,0 +1,57 @@
+name: Apple smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show Apple toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Sign test executables with Apple codesign
+        run: |
+          go version
+          printf 'package main\nfunc main() {}\n' > "$RUNNER_TEMP/smoke.go"
+          for arch in amd64 arm64; do
+            target="$RUNNER_TEMP/unsigned/darwin-$arch"
+            mkdir -p "$target"
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build -trimpath -o "$target/wheelmaker" "$RUNNER_TEMP/smoke.go"
+          done
+          bash mac-sign.sh "$RUNNER_TEMP/unsigned" "$RUNNER_TEMP/signed"
+          "$RUNNER_TEMP/signed/darwin-arm64/wheelmaker"
+          tar -czf "$RUNNER_TEMP/macos-local-signatures.tar.gz" -C "$RUNNER_TEMP/signed" .
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: macos-local-signatures
+          path: ${{ runner.temp }}/macos-local-signatures.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Build iOS simulator app and unsigned iPhone archive
+        run: |
+          bash ios-smoke/run.sh
+          tar -czf "$RUNNER_TEMP/ios-unsigned-archive.tar.gz" -C ios-smoke/build WheelMakerSmoke-unsigned.xcarchive
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ios-unsigned-archive
+          path: ${{ runner.temp }}/ios-unsigned-archive.tar.gz
+          if-no-files-found: error
+          retention-days: 3
