@@ -37,7 +37,8 @@ if (profile.get("TeamIdentifier") != [team] or
     len(set(profile.get("ProvisionedDevices", []))) < 2 or
     profile["ExpirationDate"].replace(tzinfo=datetime.timezone.utc) <= datetime.datetime.now(datetime.timezone.utc)):
     raise ValueError("Expected a current Ad Hoc profile with registered iPhone and iPad devices")
-profile_id = str(uuid.UUID(profile["UUID"])).upper()
+profile_id = profile["UUID"]
+uuid.UUID(profile_id)
 (root / "ExportOptions.plist").write_bytes(plistlib.dumps({
     "method": "release-testing",
     "signingStyle": "manual",
