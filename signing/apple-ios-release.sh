@@ -71,7 +71,7 @@ cp "$WM_WORK/profile.mobileprovision" "$legacy_profile_path"
 archive="$WM_WORK/WheelMaker.xcarchive"
 xcodebuild -project "$WM_WORK/source/mobile/ios/WheelMaker.xcodeproj" -scheme WheelMaker \
   -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$WM_WORK/DerivedData" \
-  -archivePath "$archive" "DEVELOPMENT_TEAM=$WM_TEAM_ID" "MARKETING_VERSION=${WM_VERSION#v}" \
+  -archivePath "$archive" "DEVELOPMENT_TEAM=$WM_TEAM_ID" "MARKETING_VERSION=${WM_VERSION#v}.0" \
   "CURRENT_PROJECT_VERSION=${WM_VERSION#v1.}" CODE_SIGN_STYLE=Manual 'CODE_SIGN_IDENTITY=Apple Distribution' \
   "PROVISIONING_PROFILE_SPECIFIER=$profile_id" archive
 xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$WM_WORK/ExportOptions.plist" -exportPath "$WM_WORK/export"
@@ -97,13 +97,13 @@ root = Path(os.environ["WM_WORK"])
 info = plistlib.loads((root / "ipa/Payload/WheelMaker.app/Info.plist").read_bytes())
 version = os.environ["WM_VERSION"]
 if (info.get("CFBundleIdentifier") != "com.wheelmaker.ios" or
-    info.get("CFBundleShortVersionString") != version[1:] or
+    info.get("CFBundleShortVersionString") != version[1:] + ".0" or
     info.get("CFBundleVersion") != version[3:] or
     sorted(info.get("UIDeviceFamily", [])) != [1, 2]):
     raise ValueError("Signed IPA identity or device families do not match the requested release")
 (root / "evidence.json").write_text(json.dumps({
     "bundleID": info["CFBundleIdentifier"],
-    "bundleVersion": info["CFBundleShortVersionString"],
+    "marketingVersion": info["CFBundleShortVersionString"],
     "buildNumber": info["CFBundleVersion"],
     "deviceFamilies": [1, 2],
     "teamID": os.environ["WM_TEAM_ID"],
