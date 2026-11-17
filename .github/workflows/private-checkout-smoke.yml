@@ -1,0 +1,75 @@
+name: Private checkout smoke test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  private-checkout:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Read and build the private fixture
+        env:
+          CHECKOUT_SETTINGS: ${{ secrets.WM_PRIVATE_CHECKOUT_SMOKE }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shlex
+          import subprocess
+          import sys
+          from tempfile import TemporaryDirectory
+
+          environment = dict(os.environ)
+          raw_settings = environment.pop("CHECKOUT_SETTINGS", "")
+          if not raw_settings:
+              sys.exit("Private checkout settings are missing.")
+          settings = json.loads(raw_settings)
+
+          def run(stage, args, cwd=None):
+              result = subprocess.run(
+                  args, cwd=cwd, env=environment,
+                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+              )
+              if result.returncode:
+                  sys.exit(f"{stage} failed (exit {result.returncode}).")
+
+          with TemporaryDirectory(dir=os.environ["RUNNER_TEMP"]) as directory:
+              root = Path(directory)
+              key = root / "key"
+              hosts = root / "known_hosts"
+              key.touch(mode=0o600)
+              key.write_text(settings.pop("key"))
+              hosts.write_text(
+                  "github.com ssh-ed25519 "
+                  "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+                  "\n"
+              )
+              checkout = root / "checkout"
+              run("Initialize checkout", ["git", "init", "-q", str(checkout)])
+              environment["GIT_TERMINAL_PROMPT"] = "0"
+              environment["GIT_SSH_COMMAND"] = shlex.join([
+                  "ssh", "-i", str(key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+                  "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={hosts}",
+              ])
+              try:
+                  run("Private fetch", ["git", "fetch", "--depth=1", settings["repository"], settings["commit"]], checkout)
+              finally:
+                  key.unlink()
+                  environment.pop("GIT_SSH_COMMAND")
+              run("Checkout fixture", ["git", "checkout", "--detach", "FETCH_HEAD"], checkout)
+              commit = subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], cwd=checkout, env=environment, text=True,
+              ).strip()
+              if commit != settings["commit"]:
+                  sys.exit("Private fixture revision did not match.")
+              print("Private fixture checkout verified.")
+              run("iOS fixture build", ["bash", "ios-smoke/run.sh"], checkout)
+              if not (checkout / "ios-smoke/build/WheelMakerSmoke-unsigned.xcarchive").is_dir():
+                  sys.exit("The private fixture did not produce an archive.")
+              print("Unsigned device archive verified from the private fixture.")
+          PY
