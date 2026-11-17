@@ -55,8 +55,7 @@ jobs:
       - name: Download encrypted input
         env:
           WM_ASSET_ID: ${{ inputs.asset_id }}
-          WM_STAGING_REPOSITORY: ${{ vars.WM_STAGING_REPOSITORY }}
-          WM_STAGING_TOKEN: ${{ secrets.WM_STAGING_READ_TOKEN }}
+          WM_GITHUB_TOKEN: ${{ github.token }}
           WM_MAC_INPUT_KEY: ${{ secrets.WM_MAC_INPUT_PRIVATE_KEY }}
         run: node signing/apple-release-job.mjs download-mac
       - name: Sign macOS binaries

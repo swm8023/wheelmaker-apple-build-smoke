@@ -22,14 +22,14 @@ function jobContext(kind) {
 
 async function downloadInput() {
   const context = jobContext('mac-input');
-  if (!/^\d+$/.test(env.WM_ASSET_ID ?? '') || !/^[\w.-]+\/[\w.-]+$/.test(env.WM_STAGING_REPOSITORY ?? '') ||
-    !/^[0-9a-f]{64}$/.test(env.WM_INPUT_SHA ?? '') || !env.WM_STAGING_TOKEN || !env.WM_MAC_INPUT_KEY) {
+  if (!/^\d+$/.test(env.WM_ASSET_ID ?? '') || !/^[\w.-]+\/[\w.-]+$/.test(env.GITHUB_REPOSITORY ?? '') ||
+    !/^[0-9a-f]{64}$/.test(env.WM_INPUT_SHA ?? '') || !env.WM_GITHUB_TOKEN || !env.WM_MAC_INPUT_KEY) {
     throw new Error('macOS input or staging configuration is invalid');
   }
-  const source = 'https://api.github.com/repos/' + env.WM_STAGING_REPOSITORY + '/releases/assets/' + env.WM_ASSET_ID;
+  const source = 'https://api.github.com/repos/' + env.GITHUB_REPOSITORY + '/releases/assets/' + env.WM_ASSET_ID;
   const headers = {
     'X-GitHub-Api-Version': '2026-03-10',
-    Authorization: 'Bearer ' + env.WM_STAGING_TOKEN,
+    Authorization: 'Bearer ' + env.WM_GITHUB_TOKEN,
   };
   const metadataResponse = await fetch(source, {
     headers: {...headers, Accept: 'application/vnd.github+json'},
