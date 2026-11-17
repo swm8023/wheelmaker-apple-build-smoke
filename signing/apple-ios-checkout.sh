@@ -15,7 +15,7 @@ KEY
 export GIT_SSH_COMMAND="ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile=\"$WM_WORK/github-known-hosts\" -i \"$key\""
 source="$WM_WORK/source"
 git clone --depth=1 --branch main --filter=blob:none --no-checkout git@github.com:swm8023/WheelMaker.git "$source"
-git -C "$source" sparse-checkout set mobile/ios
+git -C "$source" sparse-checkout set mobile/ios server/internal/nativeprompt/assets server/internal/nativewebtheme/assets
 git -C "$source" fetch --depth=1 --filter=blob:none origin "$WM_SOURCE_SHA"
 git -C "$source" checkout --detach "$WM_SOURCE_SHA"
 [[ "$(git -C "$source" rev-parse HEAD)" == "$WM_SOURCE_SHA" ]]
