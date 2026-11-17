@@ -26,6 +26,7 @@ case "${1:-}" in
     unset WM_MAC_P12 WM_MAC_P12_PASSWORD
     rm -f "$WM_WORK/identity.p12"
     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+    security list-keychains -d user -s "$keychain"
     identity="$(security find-identity -v -p codesigning "$keychain" | awk -v team="($WM_TEAM_ID)" '
       /Developer ID Application:/ && index($0, team) { n++; identity=$2 }
       END { if (n == 1) print identity; else exit 1 }
