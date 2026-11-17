@@ -15,8 +15,17 @@ KEY
 export GIT_SSH_COMMAND="ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile=\"$WM_WORK/github-known-hosts\" -i \"$key\""
 source="$WM_WORK/source"
 git clone --depth=1 --branch main --filter=blob:none --no-checkout git@github.com:swm8023/WheelMaker.git "$source"
-git -C "$source" sparse-checkout set mobile/ios server/internal/nativeprompt/assets server/internal/nativewebtheme/assets
 git -C "$source" fetch --depth=1 --filter=blob:none origin "$WM_SOURCE_SHA"
+if git -C "$source" cat-file -e "$WM_SOURCE_SHA:platform/ios/WheelMaker.xcodeproj/project.pbxproj"; then
+  ios_dir=platform/ios
+  git -C "$source" sparse-checkout set --no-cone /platform/ios/ /platform/shared/ /scripts/build-native-go.mjs \
+    /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/
+else
+  ios_dir=mobile/ios
+  git -C "$source" sparse-checkout set --no-cone /mobile/ios/ \
+    /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/
+fi
 git -C "$source" checkout --detach "$WM_SOURCE_SHA"
 [[ "$(git -C "$source" rev-parse HEAD)" == "$WM_SOURCE_SHA" ]]
-test -f "$source/mobile/ios/WheelMaker.xcodeproj/project.pbxproj"
+test -f "$source/$ios_dir/WheelMaker.xcodeproj/project.pbxproj"
+printf 'WM_IOS_PROJECT=%s\n' "$source/$ios_dir/WheelMaker.xcodeproj" >>"$GITHUB_ENV"

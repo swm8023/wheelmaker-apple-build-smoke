@@ -3,7 +3,7 @@ set -euo pipefail
 set +x
 umask 077
 
-: "${WM_WORK:?}" "${WM_TEAM_ID:?}" "${WM_IOS_P12:?}" "${WM_IOS_P12_PASSWORD:?}" "${WM_IOS_PROFILE:?}"
+: "${WM_WORK:?}" "${WM_IOS_PROJECT:?}" "${WM_TEAM_ID:?}" "${WM_IOS_P12:?}" "${WM_IOS_P12_PASSWORD:?}" "${WM_IOS_PROFILE:?}"
 [[ "$WM_TEAM_ID" =~ ^[A-Z0-9]{10}$ && "${WM_VERSION:-}" =~ ^v1\.[1-9][0-9]*$ ]]
 keychain="$WM_WORK/ios-signing.keychain-db"
 password="$(openssl rand -hex 32)"
@@ -70,7 +70,7 @@ cp "$WM_WORK/profile.mobileprovision" "$profile_path"
 cp "$WM_WORK/profile.mobileprovision" "$legacy_profile_path"
 
 archive="$WM_WORK/WheelMaker.xcarchive"
-xcodebuild -project "$WM_WORK/source/mobile/ios/WheelMaker.xcodeproj" -scheme WheelMaker \
+xcodebuild -project "$WM_IOS_PROJECT" -scheme WheelMaker \
   -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$WM_WORK/DerivedData" \
   -archivePath "$archive" "DEVELOPMENT_TEAM=$WM_TEAM_ID" "MARKETING_VERSION=${WM_VERSION#v}.0" \
   "CURRENT_PROJECT_VERSION=${WM_VERSION#v1.}" CODE_SIGN_STYLE=Manual 'CODE_SIGN_IDENTITY=Apple Distribution' \
