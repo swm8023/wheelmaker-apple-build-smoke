@@ -2,13 +2,11 @@ import SwiftUI
 import UIKit
 import WebKit
 
-private let mode = ProcessInfo.processInfo.environment["PROBE_BOTTOM_ANCHOR"] ?? "guide"
-
 @main
 struct KeyboardProbe: App {
     var body: some Scene {
         WindowGroup {
-            ProbeView().ignoresSafeArea(.keyboard, edges: .bottom)
+            ProbeView().ignoresSafeArea(.all, edges: .vertical)
         }
     }
 }
@@ -34,11 +32,16 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
         web.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(web)
 
-        let guide = view.keyboardLayoutGuide
-        guide.usesBottomSafeArea = false
-        bottomConstraint = web.bottomAnchor.constraint(equalTo: mode == "guide" ? guide.topAnchor : view.bottomAnchor)
+        let top = web.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: -4)
+        let bottom = web.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        top.priority = .defaultHigh
+        bottom.priority = .defaultHigh
+        bottomConstraint = web.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
-            web.topAnchor.constraint(equalTo: view.topAnchor),
+            top,
+            bottom,
+            web.topAnchor.constraint(greaterThanOrEqualTo: view.topAnchor),
+            web.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: 4),
             bottomConstraint,
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -59,7 +62,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     @objc private func keyboardShown(_ notification: Notification) { shown += 1 }
     @objc private func keyboardHidden(_ notification: Notification) {
         hidden += 1
-        if mode == "notification", let screen = notification.object as? UIScreen, screen === view.window?.windowScene?.screen {
+        if let screen = notification.object as? UIScreen, screen === view.window?.windowScene?.screen {
             bottomConstraint.constant = 0
         }
     }
@@ -75,7 +78,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             && overlap.width >= view.bounds.width - pixel
         let height = docked ? overlap.height : 0
         frameEvents.append(["screenY": frame.minY, "overlap": height])
-        guard mode == "notification", bottomConstraint.constant != -height else { return }
+        guard bottomConstraint.constant != -height else { return }
 
         bottomConstraint.constant = -height
         let duration = info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
@@ -219,6 +222,8 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             composerPaddingBottom: getComputedStyle(composer).paddingBottom,
             composerBottom: composer.getBoundingClientRect().bottom,
             editorBottom: box.bottom,
+            headerContentTop: document.querySelector('header').getBoundingClientRect().top
+                + parseFloat(getComputedStyle(document.querySelector('header')).paddingTop),
             editorGapToVisualBottom: visualViewport.offsetTop + visualViewport.height - box.bottom,
             editorHeight: box.height,
             editorFocused: document.activeElement === editor,
