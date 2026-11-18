@@ -3,17 +3,35 @@ import UIKit
 import WebKit
 
 private let mode = ProcessInfo.processInfo.environment["SAFE_AREA_MODE"] ?? "baseline"
+private let colorHex = mode == "dark" ? "1e1e1e" : "e6f7ff"
+private let colorValue = UInt32(colorHex, radix: 16)!
+private let background = UIColor(red: CGFloat((colorValue >> 16) & 255) / 255,
+                                 green: CGFloat((colorValue >> 8) & 255) / 255,
+                                 blue: CGFloat(colorValue & 255) / 255, alpha: 1)
 
 @main
 struct SafeAreaProbe: App {
     var body: some Scene {
         WindowGroup {
-            if mode == "container" || mode == "both" {
-                Browser().ignoresSafeArea(.all, edges: .vertical)
-            } else {
+            if mode == "baseline" {
                 Browser().ignoresSafeArea(.keyboard, edges: .bottom)
+            } else {
+                Root()
             }
         }
+    }
+}
+
+private struct Root: View {
+    @State private var color = UIColor.systemBackground
+
+    var body: some View {
+        Browser()
+            .background {
+                Color(uiColor: color).ignoresSafeArea(.container, edges: .vertical)
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .onAppear { color = background }
     }
 }
 
@@ -25,6 +43,7 @@ private struct Browser: UIViewControllerRepresentable {
 @MainActor
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
+    private let composer = UITextField(frame: CGRect(x: 20, y: 100, width: 150, height: 40))
 
     private func mark(_ message: String) {
         let file = URL.documentsDirectory.appendingPathComponent("phase.txt")
@@ -41,6 +60,8 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
         view.addSubview(web)
         let guide = view.keyboardLayoutGuide
         guide.usesBottomSafeArea = false
+        composer.text = "Keyboard test"
+        if mode == "keyboard" { view.addSubview(composer) }
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.topAnchor),
             web.bottomAnchor.constraint(equalTo: guide.topAnchor),
@@ -52,12 +73,12 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         mark("viewDidAppear")
-        let viewport = mode == "viewport" || mode == "both" ? ",viewport-fit=cover" : ""
+
         web.loadHTMLString("""
             <!doctype html>
-            <meta name="viewport" content="width=device-width,initial-scale=1\(viewport)">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
             <style>
-            html, body { margin: 0; background: #e6f7ff; }
+            html, body { margin: 0; background: #\(colorHex); }
             body { height: 100dvh; display: flex; flex-direction: column; justify-content: space-between; }
             header { padding-top: env(safe-area-inset-top, 0px); }
             footer { padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)); }
@@ -102,6 +123,22 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
                 ]
                 let data = try JSONSerialization.data(withJSONObject: record, options: .sortedKeys)
                 try data.write(to: URL.documentsDirectory.appendingPathComponent("result.json"), options: .atomic)
+                if mode == "keyboard" {
+                    let initialBottom = web.bounds.height
+                    composer.becomeFirstResponder()
+                    for _ in 0..<120 {
+                        if initialBottom - web.bounds.height > 150 { break }
+                        try await Task.sleep(for: .milliseconds(100))
+                    }
+                    let keyboardBottom = web.bounds.height
+                    composer.resignFirstResponder()
+                    for _ in 0..<120 {
+                        if abs(initialBottom - web.bounds.height) < 1 { break }
+                        try await Task.sleep(for: .milliseconds(100))
+                    }
+                    let keyboardResult = try JSONSerialization.data(withJSONObject: ["initial": initialBottom, "open": keyboardBottom, "closed": web.bounds.height])
+                    try keyboardResult.write(to: URL.documentsDirectory.appendingPathComponent("keyboard.json"), options: .atomic)
+                }
                 mark("complete")
             } catch {
                 mark("error: \(error)")

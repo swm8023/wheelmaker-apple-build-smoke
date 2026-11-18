@@ -1,4 +1,4 @@
-name: Synthetic iPhone safe-area test
+name: Verify iPhone workspace background and keyboard
 on:
   push:
     branches: [test/ios-workspace-layout-probe]
@@ -42,15 +42,18 @@ jobs:
           sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
           xcrun --sdk iphonesimulator swiftc -parse-as-library -sdk "$sdk" -target "$(uname -m)-apple-ios26.0-simulator" safe-area-probe/Probe.swift -o "$app/SafeAreaProbe"
           codesign --force --sign - "$app"
-      - name: Measure an iPhone with its keyboard hidden
+      - name: Verify background colors and keyboard on iPhone
         run: |
           set -euo pipefail
           device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for runtime, ds in reversed(list(json.load(sys.stdin)["devices"].items())) if ".iOS-" in runtime for d in ds if d["name"] == "iPhone 17 Pro" and d["isAvailable"]))')"
           xcrun simctl list devices available | grep "$device"
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
           xcrun simctl boot "$device" || true
           xcrun simctl bootstatus "$device" -b
           xcrun simctl install "$device" "$RUNNER_TEMP/SafeAreaProbe.app"
+          swiftc safe-area-probe/Sample.swift -o "$RUNNER_TEMP/sample-color"
           python3 - "$device" <<'PY'
+          import json
           import os
           from pathlib import Path
           import subprocess
@@ -63,14 +66,16 @@ jobs:
           data = Path(simctl("get_app_container", device, bundle, "data", capture_output=True, text=True).stdout.strip())
           result = data / "Documents" / "result.json"
           phase = data / "Documents" / "phase.txt"
-          for mode in ("baseline", "container", "viewport", "both"):
+          temp = Path(os.environ["RUNNER_TEMP"])
+          reference = None
+          for mode in ("baseline", "light", "dark", "keyboard"):
               phase.unlink(missing_ok=True)
               result.unlink(missing_ok=True)
               simctl("launch", "--terminate-running-process", device, bundle,
                      env={**os.environ, "SIMCTL_CHILD_SAFE_AREA_MODE": mode})
               deadline = time.monotonic() + 65
               latest = None
-              while not result.is_file() and time.monotonic() < deadline:
+              while latest != "complete" and time.monotonic() < deadline:
                   current = phase.read_text() if phase.is_file() else None
                   if current != latest:
                       print(mode, current, flush=True)
@@ -78,6 +83,28 @@ jobs:
                   if current and current.startswith("error:"):
                       break
                   time.sleep(0.25)
-              assert result.is_file(), (mode, latest)
+              assert result.is_file() and latest == "complete", (mode, latest)
+              geometry = json.loads(result.read_text())
               print("SAFE_AREA_RESULT " + result.read_text(), flush=True)
+              # Contents retain their single system inset while the background fills the window.
+              frame = [geometry[x] for x in ("webTop", "webBottom", "webHeight")]
+              if mode == "baseline":
+                  reference = frame
+              assert frame == reference
+              assert geometry["webTop"] == geometry["windowSafeTop"]
+              assert geometry["window"] - geometry["webBottom"] == geometry["windowSafeBottom"]
+              if mode == "keyboard":
+                  keyboard = json.loads((data / "Documents" / "keyboard.json").read_text())
+                  print("KEYBOARD_RESULT " + json.dumps(keyboard), flush=True)
+                  assert keyboard["initial"] - keyboard["open"] > 150, keyboard
+                  assert abs(keyboard["closed"] - keyboard["initial"]) < 1, keyboard
+                  continue
+              screenshot = temp / (mode + ".png")
+              simctl("io", device, "screenshot", str(screenshot))
+              colors = subprocess.check_output([str(temp / "sample-color"), str(screenshot)], text=True).split()
+              print("BACKGROUND_RESULT", mode, colors, flush=True)
+              if mode == "baseline":
+                  assert colors[0] != colors[1] or colors[2] != colors[1]
+              else:
+                  assert colors[0] == colors[1] == colors[2], colors
           PY
