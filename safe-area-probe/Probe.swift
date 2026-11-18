@@ -2,11 +2,13 @@ import SwiftUI
 import UIKit
 import WebKit
 
+private let nativeOwnsBottomInset = ProcessInfo.processInfo.environment["PROBE_BOTTOM_ANCHOR"] == "native"
+
 @main
 struct KeyboardProbe: App {
     var body: some Scene {
         WindowGroup {
-            ProbeView().ignoresSafeArea(.keyboard, edges: .bottom)
+            ProbeView().ignoresSafeArea(nativeOwnsBottomInset ? .all : .keyboard, edges: .bottom)
         }
     }
 }
@@ -19,8 +21,6 @@ private struct ProbeView: UIViewControllerRepresentable {
 @MainActor
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
-    private let useClosedOffset = ProcessInfo.processInfo.environment["PROBE_BOTTOM_ANCHOR"] == "offset"
-    private var keyboardBottomConstraint: NSLayoutConstraint!
     private var shown = 0
     private var hidden = 0
 
@@ -33,18 +33,13 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
         view.addSubview(web)
 
         let guide = view.keyboardLayoutGuide
-        guide.usesBottomSafeArea = false
-        keyboardBottomConstraint = web.bottomAnchor.constraint(equalTo: guide.topAnchor)
+        guide.usesBottomSafeArea = nativeOwnsBottomInset
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.topAnchor),
-            keyboardBottomConstraint,
+            web.bottomAnchor.constraint(equalTo: guide.topAnchor),
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
-        if useClosedOffset {
-            NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
-                                                   name: UIResponder.keyboardWillShowNotification, object: nil)
-        }
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardShown(_:)),
                                                name: UIResponder.keyboardDidShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardHidden(_:)),
@@ -56,18 +51,8 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
         web.loadHTMLString(Self.document, baseURL: nil)
     }
 
-    @objc private func keyboardWillShow(_ notification: Notification) {
-        keyboardBottomConstraint.constant = 0
-    }
-
     @objc private func keyboardShown(_ notification: Notification) { shown += 1 }
-    @objc private func keyboardHidden(_ notification: Notification) {
-        hidden += 1
-        if useClosedOffset {
-            view.layoutIfNeeded()
-            keyboardBottomConstraint.constant = view.bounds.maxY - view.keyboardLayoutGuide.layoutFrame.minY
-        }
-    }
+    @objc private func keyboardHidden(_ notification: Notification) { hidden += 1 }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
