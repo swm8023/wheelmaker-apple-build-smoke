@@ -22,7 +22,7 @@ if git -C "$source" cat-file -e "$WM_SOURCE_SHA:platform/ios/WheelMaker.xcodepro
 fi
 project_file="$ios_dir/WheelMaker.xcodeproj/project.pbxproj"
 project_source="$(git -C "$source" show "$WM_SOURCE_SHA:$project_file")"
-sparse=("/$ios_dir/" /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/)
+sparse=("/$ios_dir/" /platform/assets/ /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/)
 build_go=false
 if [[ "$ios_dir" == platform/ios && "$project_source" == *Mobilebind.xcframework* ]]; then
   build_go=true
