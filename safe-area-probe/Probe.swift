@@ -2,40 +2,16 @@ import SwiftUI
 import UIKit
 import WebKit
 
-private let mode = ProcessInfo.processInfo.environment["SAFE_AREA_MODE"] ?? "baseline"
-private let colorHex = mode == "dark" ? "1e1e1e" : "e6f7ff"
-private let colorValue = UInt32(colorHex, radix: 16)!
-private let workspaceColor = UIColor(red: CGFloat((colorValue >> 16) & 255) / 255,
-                                 green: CGFloat((colorValue >> 8) & 255) / 255,
-                                 blue: CGFloat(colorValue & 255) / 255, alpha: 1)
-
 @main
-struct SafeAreaProbe: App {
+struct KeyboardProbe: App {
     var body: some Scene {
         WindowGroup {
-            if mode == "baseline" {
-                Browser().ignoresSafeArea(.keyboard, edges: .bottom)
-            } else {
-                Root()
-            }
+            ProbeView().ignoresSafeArea(.keyboard, edges: .bottom)
         }
     }
 }
 
-private struct Root: View {
-    @State private var color = UIColor.systemBackground
-
-    var body: some View {
-        Browser()
-            .background {
-                Color(uiColor: color).ignoresSafeArea(.container, edges: .vertical)
-            }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            .onAppear { color = workspaceColor }
-    }
-}
-
-private struct Browser: UIViewControllerRepresentable {
+private struct ProbeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> ProbeController { ProbeController() }
     func updateUIViewController(_ controller: ProbeController, context: Context) {}
 }
@@ -43,106 +19,172 @@ private struct Browser: UIViewControllerRepresentable {
 @MainActor
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
-    private let composer = UITextField(frame: CGRect(x: 20, y: 100, width: 150, height: 40))
-
-    private func mark(_ message: String) {
-        let file = URL.documentsDirectory.appendingPathComponent("phase.txt")
-        try? message.write(to: file, atomically: true, encoding: .utf8)
-    }
+    private var shown = 0
+    private var hidden = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        mark("viewDidLoad")
-        view.backgroundColor = .lightGray
         web.navigationDelegate = self
         web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.scrollView.bounces = false
         web.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(web)
+
         let guide = view.keyboardLayoutGuide
         guide.usesBottomSafeArea = false
-        composer.text = "Keyboard test"
-        if mode == "keyboard" { view.addSubview(composer) }
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.topAnchor),
             web.bottomAnchor.constraint(equalTo: guide.topAnchor),
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardShown(_:)),
+                                               name: UIResponder.keyboardDidShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardHidden(_:)),
+                                               name: UIResponder.keyboardDidHideNotification, object: nil)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        mark("viewDidAppear")
-
-        web.loadHTMLString("""
-            <!doctype html>
-            <meta name="viewport" content="width=device-width,initial-scale=1">
-            <style>
-            html, body { margin: 0; background: #\(colorHex); }
-            body { height: 100dvh; display: flex; flex-direction: column; justify-content: space-between; }
-            header { padding-top: env(safe-area-inset-top, 0px); }
-            footer { padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)); }
-            </style>
-            <header>Header</header><footer><input placeholder="Composer"></footer>
-            """, baseURL: nil)
+        web.loadHTMLString(Self.document, baseURL: nil)
     }
 
+    @objc private func keyboardShown(_ notification: Notification) { shown += 1 }
+    @objc private func keyboardHidden(_ notification: Notification) { hidden += 1 }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        mark("didFinish")
         Task { @MainActor in
+            let destination = URL.documentsDirectory.appendingPathComponent("result.json")
             do {
-                let result = try await web.evaluateJavaScript("""
-                    (() => {
-                    const header = document.querySelector('header');
-                    const footer = document.querySelector('footer');
-                    return {
-                      innerHeight, viewportHeight: visualViewport.height,
-                      bodyHeight: document.body.getBoundingClientRect().height,
-                      headerPadding: getComputedStyle(header).paddingTop,
-                      footerPadding: getComputedStyle(footer).paddingBottom,
-                      inputBottom: document.querySelector('input').getBoundingClientRect().bottom
-                    };
-                    })()
-                    """)
-                view.layoutIfNeeded()
-                guard let window = view.window else { fatalError("Window unavailable") }
-                let hostFrame = view.convert(view.bounds, to: window)
-                let webFrame = web.convert(web.bounds, to: window)
-                let record: [String: Any] = [
-                    "mode": mode, "device": UIDevice.current.model,
-                    "iOS": UIDevice.current.systemVersion,
-                    "window": window.bounds.height, "windowWidth": window.bounds.width,
-                    "windowSafeTop": window.safeAreaInsets.top, "windowSafeBottom": window.safeAreaInsets.bottom,
-                    "hostTop": hostFrame.minY, "hostBottom": hostFrame.maxY, "hostHeight": hostFrame.height,
-                    "webTop": webFrame.minY, "webBottom": webFrame.maxY, "webHeight": webFrame.height,
-                    "webSafeTop": web.safeAreaInsets.top, "webSafeBottom": web.safeAreaInsets.bottom,
-                    "scrollTop": web.scrollView.adjustedContentInset.top,
-                    "scrollBottom": web.scrollView.adjustedContentInset.bottom,
-                    "keyboardGuideTop": view.keyboardLayoutGuide.layoutFrame.minY,
-                    "page": result ?? [:],
-                ]
-                let data = try JSONSerialization.data(withJSONObject: record, options: .sortedKeys)
-                try data.write(to: URL.documentsDirectory.appendingPathComponent("result.json"), options: .atomic)
-                if mode == "keyboard" {
-                    let initialBottom = web.bounds.height
-                    composer.becomeFirstResponder()
-                    for _ in 0..<120 {
-                        if initialBottom - web.bounds.height > 150 { break }
-                        try await Task.sleep(for: .milliseconds(100))
-                    }
-                    let keyboardBottom = web.bounds.height
-                    composer.resignFirstResponder()
-                    for _ in 0..<120 {
-                        if abs(initialBottom - web.bounds.height) < 1 { break }
-                        try await Task.sleep(for: .milliseconds(100))
-                    }
-                    let keyboardResult = try JSONSerialization.data(withJSONObject: ["initial": initialBottom, "open": keyboardBottom, "closed": web.bounds.height])
-                    try keyboardResult.write(to: URL.documentsDirectory.appendingPathComponent("keyboard.json"), options: .atomic)
-                }
-                mark("complete")
+                let result = try await measure()
+                let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+                try data.write(to: destination, options: .atomic)
             } catch {
-                mark("error: \(error)")
+                let data = try? JSONSerialization.data(withJSONObject: ["error": String(describing: error)])
+                try? data?.write(to: destination, options: .atomic)
             }
         }
     }
+
+    private func measure() async throws -> [String: Any] {
+        var cycles: [[String: Any]] = []
+        for (index, mode) in ["short", "wrapped", "wrapped"].enumerated() {
+            _ = try await web.evaluateJavaScript("prepare('\(mode)')")
+            try await Task.sleep(for: .milliseconds(200))
+            let before = try await snapshot()
+
+            let previousShowCount = shown
+            _ = try await web.evaluateJavaScript("startEditing()")
+            try await waitForKeyboard("show") { shown > previousShowCount }
+            try await Task.sleep(for: .milliseconds(250))
+            let open = try await snapshot()
+
+            let previousHideCount = hidden
+            _ = try await web.evaluateJavaScript("document.getElementById('editor').blur(); true")
+            try await waitForKeyboard("hide") { hidden > previousHideCount }
+            let dismissed = try await snapshot()
+            try await Task.sleep(for: .seconds(1))
+            let settled = try await snapshot()
+            cycles.append(["cycle": index + 1, "mode": mode, "before": before,
+                           "open": open, "dismissed": dismissed, "settled": settled])
+        }
+        return ["iOS": UIDevice.current.systemVersion, "cycles": cycles]
+    }
+
+    private func waitForKeyboard(_ event: String, until condition: () -> Bool) async throws {
+        for _ in 0..<60 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw NSError(domain: "KeyboardProbe", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "Software keyboard did not \(event)"])
+    }
+
+    private func snapshot() async throws -> [String: Any] {
+        view.layoutIfNeeded()
+        guard let window = view.window,
+              let page = try await web.evaluateJavaScript("geometry()") as? [String: Any] else {
+            throw NSError(domain: "KeyboardProbe", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Window or page geometry unavailable"])
+        }
+        let frame = web.convert(web.bounds, to: window)
+        let scroll = web.scrollView
+        return [
+            "windowHeight": window.bounds.height,
+            "windowSafeTop": window.safeAreaInsets.top,
+            "windowSafeBottom": window.safeAreaInsets.bottom,
+            "webTop": frame.minY,
+            "webBottom": frame.maxY,
+            "webHeight": frame.height,
+            "webSafeBottom": web.safeAreaInsets.bottom,
+            "keyboardGuideTop": view.keyboardLayoutGuide.layoutFrame.minY,
+            "scrollOffsetY": scroll.contentOffset.y,
+            "scrollContentHeight": scroll.contentSize.height,
+            "scrollInsetBottom": scroll.adjustedContentInset.bottom,
+            "page": page,
+        ]
+    }
+
+    private static let document = """
+        <!doctype html>
+        <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+        <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body, main { height: 100%; width: 100%; margin: 0; overflow: hidden; }
+        body { background: #1e1e1e; color: white; font: 16px system-ui; }
+        main { display: flex; flex-direction: column; }
+        header { padding: max(8px, env(safe-area-inset-top, 0px)) 12px 8px; }
+        section { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
+        footer { flex: none; padding: 0 12px max(6px, env(safe-area-inset-bottom, 0px)); }
+        #editor { min-height: 34px; max-height: 180px; overflow-y: auto; padding: 6px 8px;
+                  background: #2e2e2e; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+        </style>
+        <main>
+          <header>Synthetic conversation</header>
+          <section id="messages"></section>
+          <footer id="composer">
+            <div id="editor" contenteditable="true" role="textbox" aria-multiline="true" enterkeyhint="enter"></div>
+          </footer>
+        </main>
+        <script>
+        const editor = document.getElementById('editor');
+        const messages = document.getElementById('messages');
+        const composer = document.getElementById('composer');
+        for (let index = 0; index < 40; index++) {
+          const line = document.createElement('p');
+          line.textContent = 'Sample message ' + (index + 1);
+          messages.append(line);
+        }
+        function prepare(mode) {
+          editor.textContent = mode === 'short'
+            ? 'Draft'
+            : 'This longer sample draft wraps onto multiple lines in a narrow chat composer. '.repeat(6);
+          messages.scrollTop = messages.scrollHeight;
+          return true;
+        }
+        function startEditing() {
+          editor.focus();
+          window.getSelection().collapse(editor.lastChild, editor.lastChild.length);
+          return document.activeElement === editor;
+        }
+        function geometry() {
+          const box = editor.getBoundingClientRect();
+          return {
+            innerHeight,
+            documentHeight: document.documentElement.clientHeight,
+            visualHeight: visualViewport.height,
+            visualOffsetTop: visualViewport.offsetTop,
+            visualScale: visualViewport.scale,
+            pageScrollY: scrollY,
+            composerPaddingBottom: getComputedStyle(composer).paddingBottom,
+            composerBottom: composer.getBoundingClientRect().bottom,
+            editorBottom: box.bottom,
+            editorGapToVisualBottom: visualViewport.offsetTop + visualViewport.height - box.bottom,
+            editorHeight: box.height,
+            editorFocused: document.activeElement === editor,
+            transcriptScrollTop: messages.scrollTop,
+          };
+        }
+        </script>
+        """
 }
