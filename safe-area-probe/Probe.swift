@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WebKit
 
 private let mode = ProcessInfo.processInfo.environment["SAFE_AREA_MODE"] ?? "baseline"
@@ -25,8 +26,14 @@ private struct Browser: UIViewControllerRepresentable {
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
 
+    private func mark(_ message: String) {
+        let file = URL.documentsDirectory.appendingPathComponent("phase.txt")
+        try? message.write(to: file, atomically: true, encoding: .utf8)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        mark("viewDidLoad")
         view.backgroundColor = .lightGray
         web.navigationDelegate = self
         web.scrollView.contentInsetAdjustmentBehavior = .never
@@ -44,6 +51,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        mark("viewDidAppear")
         let viewport = mode == "viewport" || mode == "both" ? ",viewport-fit=cover" : ""
         web.loadHTMLString("""
             <!doctype html>
@@ -59,10 +67,11 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        mark("didFinish")
         Task { @MainActor in
             do {
-                let result = try await web.callAsyncJavaScript("""
-                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                let result = try await web.evaluateJavaScript("""
+                    (() => {
                     const header = document.querySelector('header');
                     const footer = document.querySelector('footer');
                     return {
@@ -72,7 +81,8 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
                       footerPadding: getComputedStyle(footer).paddingBottom,
                       inputBottom: document.querySelector('input').getBoundingClientRect().bottom
                     };
-                    """, arguments: [:], in: nil, contentWorld: .page)
+                    })()
+                    """)
                 view.layoutIfNeeded()
                 guard let window = view.window else { fatalError("Window unavailable") }
                 let hostFrame = view.convert(view.bounds, to: window)
@@ -88,14 +98,13 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
                     "scrollTop": web.scrollView.adjustedContentInset.top,
                     "scrollBottom": web.scrollView.adjustedContentInset.bottom,
                     "keyboardGuideTop": view.keyboardLayoutGuide.layoutFrame.minY,
-                    "page": result,
+                    "page": result ?? [:],
                 ]
                 let data = try JSONSerialization.data(withJSONObject: record, options: .sortedKeys)
-                FileHandle.standardOutput.write(Data("SAFE_AREA_RESULT ".utf8) + data + Data("\n".utf8))
-                exit(EXIT_SUCCESS)
+                try data.write(to: URL.documentsDirectory.appendingPathComponent("result.json"), options: .atomic)
+                mark("complete")
             } catch {
-                FileHandle.standardError.write(Data("SAFE_AREA_ERROR \(error)\n".utf8))
-                exit(EXIT_FAILURE)
+                mark("error: \(error)")
             }
         }
     }

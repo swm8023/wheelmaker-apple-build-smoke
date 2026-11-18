@@ -1,4 +1,4 @@
-name: Synthetic iPad safe-area test
+name: Synthetic iPhone safe-area test
 on:
   push:
     branches: [test/ios-workspace-layout-probe]
@@ -28,9 +28,10 @@ jobs:
           <key>CFBundleShortVersionString</key><string>1.0</string>
           <key>CFBundleVersion</key><string>1</string>
           <key>MinimumOSVersion</key><string>26.0</string>
-          <key>UIDeviceFamily</key><array><integer>2</integer></array>
+          <key>UIDeviceFamily</key><array><integer>1</integer></array>
+          <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
           <key>UILaunchScreen</key><dict/>
-          <key>UISupportedInterfaceOrientations~ipad</key><array>
+          <key>UISupportedInterfaceOrientations</key><array>
           <string>UIInterfaceOrientationPortrait</string>
           <string>UIInterfaceOrientationPortraitUpsideDown</string>
           <string>UIInterfaceOrientationLandscapeLeft</string>
@@ -41,26 +42,42 @@ jobs:
           sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
           xcrun --sdk iphonesimulator swiftc -parse-as-library -sdk "$sdk" -target "$(uname -m)-apple-ios26.0-simulator" safe-area-probe/Probe.swift -o "$app/SafeAreaProbe"
           codesign --force --sign - "$app"
-      - name: Measure an iPad with its keyboard hidden
+      - name: Measure an iPhone with its keyboard hidden
         run: |
           set -euo pipefail
-          device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for runtime, ds in reversed(list(json.load(sys.stdin)["devices"].items())) if ".iOS-" in runtime for d in ds if d["name"].startswith("iPad") and d["isAvailable"]))')"
+          device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for runtime, ds in reversed(list(json.load(sys.stdin)["devices"].items())) if ".iOS-" in runtime for d in ds if d["name"] == "iPhone 17 Pro" and d["isAvailable"]))')"
           xcrun simctl list devices available | grep "$device"
           xcrun simctl boot "$device" || true
           xcrun simctl bootstatus "$device" -b
           xcrun simctl install "$device" "$RUNNER_TEMP/SafeAreaProbe.app"
           python3 - "$device" <<'PY'
           import os
+          from pathlib import Path
           import subprocess
           import sys
+          import time
 
+          device, bundle = sys.argv[1], "example.safeareaprobe"
+          def simctl(*args, **kwargs):
+              return subprocess.run(["xcrun", "simctl", *args], check=True, timeout=60, **kwargs)
+          data = Path(simctl("get_app_container", device, bundle, "data", capture_output=True, text=True).stdout.strip())
+          result = data / "Documents" / "result.json"
+          phase = data / "Documents" / "phase.txt"
           for mode in ("baseline", "container", "viewport", "both"):
-              result = subprocess.run(
-                  ["xcrun", "simctl", "launch", "--terminate-running-process", "--console",
-                   sys.argv[1], "example.safeareaprobe"],
-                  env={**os.environ, "SIMCTL_CHILD_SAFE_AREA_MODE": mode},
-                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=50,
-              )
-              print(result.stdout, flush=True)
-              assert any(line.startswith("SAFE_AREA_RESULT ") for line in result.stdout.splitlines()), mode
+              phase.unlink(missing_ok=True)
+              result.unlink(missing_ok=True)
+              simctl("launch", "--terminate-running-process", device, bundle,
+                     env={**os.environ, "SIMCTL_CHILD_SAFE_AREA_MODE": mode})
+              deadline = time.monotonic() + 65
+              latest = None
+              while not result.is_file() and time.monotonic() < deadline:
+                  current = phase.read_text() if phase.is_file() else None
+                  if current != latest:
+                      print(mode, current, flush=True)
+                      latest = current
+                  if current and current.startswith("error:"):
+                      break
+                  time.sleep(0.25)
+              assert result.is_file(), (mode, latest)
+              print("SAFE_AREA_RESULT " + result.read_text(), flush=True)
           PY
