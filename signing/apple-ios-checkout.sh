@@ -16,15 +16,20 @@ export GIT_SSH_COMMAND="ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes 
 source="$WM_WORK/source"
 git clone --depth=1 --branch main --filter=blob:none --no-checkout git@github.com:swm8023/WheelMaker.git "$source"
 git -C "$source" fetch --depth=1 --filter=blob:none origin "$WM_SOURCE_SHA"
+ios_dir=mobile/ios
 if git -C "$source" cat-file -e "$WM_SOURCE_SHA:platform/ios/WheelMaker.xcodeproj/project.pbxproj"; then
   ios_dir=platform/ios
-  git -C "$source" sparse-checkout set --no-cone /platform/ios/ /platform/shared/ /scripts/build-native-go.mjs \
-    /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/
-else
-  ios_dir=mobile/ios
-  git -C "$source" sparse-checkout set --no-cone /mobile/ios/ \
-    /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/
 fi
+project_file="$ios_dir/WheelMaker.xcodeproj/project.pbxproj"
+project_source="$(git -C "$source" show "$WM_SOURCE_SHA:$project_file")"
+sparse=("/$ios_dir/" /server/internal/nativeprompt/assets/ /server/internal/nativewebtheme/assets/)
+build_go=false
+if [[ "$ios_dir" == platform/ios && "$project_source" == *Mobilebind.xcframework* ]]; then
+  build_go=true
+  sparse+=(/platform/shared/ /scripts/build-native-go.mjs)
+fi
+git -C "$source" sparse-checkout set --no-cone "${sparse[@]}"
+printf 'WM_IOS_BUILD_GO=%s\n' "$build_go" >>"$GITHUB_ENV"
 git -C "$source" checkout --detach "$WM_SOURCE_SHA"
 [[ "$(git -C "$source" rev-parse HEAD)" == "$WM_SOURCE_SHA" ]]
 test -f "$source/$ios_dir/WheelMaker.xcodeproj/project.pbxproj"
