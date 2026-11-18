@@ -5,7 +5,7 @@ import WebKit
 private let mode = ProcessInfo.processInfo.environment["SAFE_AREA_MODE"] ?? "baseline"
 private let colorHex = mode == "dark" ? "1e1e1e" : "e6f7ff"
 private let colorValue = UInt32(colorHex, radix: 16)!
-private let background = UIColor(red: CGFloat((colorValue >> 16) & 255) / 255,
+private let workspaceColor = UIColor(red: CGFloat((colorValue >> 16) & 255) / 255,
                                  green: CGFloat((colorValue >> 8) & 255) / 255,
                                  blue: CGFloat(colorValue & 255) / 255, alpha: 1)
 
@@ -31,7 +31,7 @@ private struct Root: View {
                 Color(uiColor: color).ignoresSafeArea(.container, edges: .vertical)
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .onAppear { color = background }
+            .onAppear { color = workspaceColor }
     }
 }
 
