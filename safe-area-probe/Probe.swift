@@ -110,7 +110,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             let previousShowCount = shown
             _ = try await web.evaluateJavaScript("startEditing()")
             try await waitForKeyboard("show") { shown > previousShowCount }
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .seconds(1))
             let open = try await snapshot()
 
             let previousHideCount = hidden

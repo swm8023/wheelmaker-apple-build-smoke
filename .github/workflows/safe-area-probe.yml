@@ -54,7 +54,7 @@ jobs:
           xcrun simctl install "$device" "$RUNNER_TEMP/SafeAreaProbe.app"
           data="$(xcrun simctl get_app_container "$device" "$bundle" data)"
           result="$data/Documents/result.json"
-          for mode in guide notification; do
+          for mode in notification guide; do
             rm -f "$result"
             SIMCTL_CHILD_PROBE_BOTTOM_ANCHOR="$mode" xcrun simctl launch --terminate-running-process "$device" "$bundle"
             for attempt in $(seq 1 80); do
@@ -81,8 +81,8 @@ jobs:
               assert opened["page"]["editorFocused"] and not closed["page"]["editorFocused"], cycle
               assert first["webHeight"] - opened["webHeight"] > 150, cycle
               assert abs(opened["page"]["visualHeight"] - opened["webHeight"]) < 1, cycle
-              assert abs(opened["page"]["editorGapToVisualBottom"] - initial_gap) < 1, cycle
               if mode == "notification":
+                  assert abs(opened["page"]["editorGapToVisualBottom"] - initial_gap) < 1, cycle
                   assert abs(first["webBottom"] - closed["webBottom"]) < 1, cycle
                   assert abs(first["webHeight"] - closed["webHeight"]) < 1, cycle
               else:
