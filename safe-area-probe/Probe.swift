@@ -19,6 +19,9 @@ private struct ProbeView: UIViewControllerRepresentable {
 @MainActor
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
+    private let useIdleAnchor = ProcessInfo.processInfo.environment["PROBE_BOTTOM_ANCHOR"] == "host"
+    private var hostBottomConstraint: NSLayoutConstraint!
+    private var keyboardBottomConstraint: NSLayoutConstraint!
     private var shown = 0
     private var hidden = 0
 
@@ -32,12 +35,20 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
 
         let guide = view.keyboardLayoutGuide
         guide.usesBottomSafeArea = false
+        hostBottomConstraint = web.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        keyboardBottomConstraint = web.bottomAnchor.constraint(equalTo: guide.topAnchor)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.topAnchor),
-            web.bottomAnchor.constraint(equalTo: guide.topAnchor),
+            useIdleAnchor ? hostBottomConstraint : keyboardBottomConstraint,
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+        if useIdleAnchor {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
+                                                   name: UIResponder.keyboardWillShowNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)),
+                                                   name: UIResponder.keyboardWillHideNotification, object: nil)
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardShown(_:)),
                                                name: UIResponder.keyboardDidShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardHidden(_:)),
@@ -47,6 +58,16 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         web.loadHTMLString(Self.document, baseURL: nil)
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        hostBottomConstraint.isActive = false
+        keyboardBottomConstraint.isActive = true
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        keyboardBottomConstraint.isActive = false
+        hostBottomConstraint.isActive = true
     }
 
     @objc private func keyboardShown(_ notification: Notification) { shown += 1 }
@@ -107,12 +128,18 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             throw NSError(domain: "KeyboardProbe", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Window or page geometry unavailable"])
         }
+        let hostFrame = view.convert(view.bounds, to: window)
         let frame = web.convert(web.bounds, to: window)
         let scroll = web.scrollView
         return [
             "windowHeight": window.bounds.height,
             "windowSafeTop": window.safeAreaInsets.top,
             "windowSafeBottom": window.safeAreaInsets.bottom,
+            "hostTop": hostFrame.minY,
+            "hostBottom": hostFrame.maxY,
+            "hostHeight": hostFrame.height,
+            "hostSafeBottom": view.safeAreaInsets.bottom,
+            "keyboardGuideHeight": view.keyboardLayoutGuide.layoutFrame.height,
             "webTop": frame.minY,
             "webBottom": frame.maxY,
             "webHeight": frame.height,
