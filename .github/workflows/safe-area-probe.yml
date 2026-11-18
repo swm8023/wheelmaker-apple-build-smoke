@@ -1,0 +1,66 @@
+name: Synthetic iPad safe-area test
+on:
+  push:
+    branches: [test/ios-workspace-layout-probe]
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile standalone SwiftUI and WebKit fixture
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/SafeAreaProbe.app"
+          mkdir -p "$app"
+          cat > "$app/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>example.safeareaprobe</string>
+          <key>CFBundleExecutable</key><string>SafeAreaProbe</string>
+          <key>CFBundleName</key><string>SafeAreaProbe</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>MinimumOSVersion</key><string>26.0</string>
+          <key>UIDeviceFamily</key><array><integer>2</integer></array>
+          <key>UILaunchScreen</key><dict/>
+          <key>UISupportedInterfaceOrientations~ipad</key><array>
+          <string>UIInterfaceOrientationPortrait</string>
+          <string>UIInterfaceOrientationPortraitUpsideDown</string>
+          <string>UIInterfaceOrientationLandscapeLeft</string>
+          <string>UIInterfaceOrientationLandscapeRight</string>
+          </array>
+          </dict></plist>
+          PLIST
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator swiftc -parse-as-library -sdk "$sdk" -target "$(uname -m)-apple-ios26.0-simulator" safe-area-probe/Probe.swift -o "$app/SafeAreaProbe"
+          codesign --force --sign - "$app"
+      - name: Measure an iPad with its keyboard hidden
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for runtime, ds in reversed(list(json.load(sys.stdin)["devices"].items())) if ".iOS-" in runtime for d in ds if d["name"].startswith("iPad") and d["isAvailable"]))')"
+          xcrun simctl list devices available | grep "$device"
+          xcrun simctl boot "$device" || true
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" "$RUNNER_TEMP/SafeAreaProbe.app"
+          python3 - "$device" <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          for mode in ("baseline", "container", "viewport", "both"):
+              result = subprocess.run(
+                  ["xcrun", "simctl", "launch", "--terminate-running-process", "--console",
+                   sys.argv[1], "example.safeareaprobe"],
+                  env={**os.environ, "SIMCTL_CHILD_SAFE_AREA_MODE": mode},
+                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=50,
+              )
+              print(result.stdout, flush=True)
+              assert any(line.startswith("SAFE_AREA_RESULT ") for line in result.stdout.splitlines()), mode
+          PY
