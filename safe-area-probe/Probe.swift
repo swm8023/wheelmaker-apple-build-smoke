@@ -22,7 +22,6 @@ private struct ProbeView: UIViewControllerRepresentable {
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
     private var bottomConstraint: NSLayoutConstraint!
-    private var keyboardFrameRevision = 0
     private var frameEvents: [[String: Any]] = []
     private var shown = 0
     private var hidden = 0
@@ -60,38 +59,30 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     @objc private func keyboardShown(_ notification: Notification) { shown += 1 }
     @objc private func keyboardHidden(_ notification: Notification) {
         hidden += 1
-        if mode == "notification" || mode == "later" {
-            keyboardFrameRevision += 1
+        if mode == "notification", let screen = notification.object as? UIScreen, screen === view.window?.windowScene?.screen {
             bottomConstraint.constant = 0
         }
     }
 
     @objc private func keyboardFrameWillChange(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let screen = notification.object as? UIScreen,
+        guard let screen = notification.object as? UIScreen, screen === view.window?.windowScene?.screen,
+              let info = notification.userInfo,
               let frame = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         let keyboard = screen.coordinateSpace.convert(frame, to: view)
         let overlap = view.bounds.intersection(keyboard)
-        let height = !overlap.isEmpty && keyboard.maxY >= view.bounds.maxY ? overlap.height : 0
+        let pixel = 1 / screen.scale
+        let docked = !overlap.isEmpty && overlap.maxY >= view.bounds.maxY - pixel
+            && overlap.width >= view.bounds.width - pixel
+        let height = docked ? overlap.height : 0
         frameEvents.append(["screenY": frame.minY, "overlap": height])
-        guard mode == "notification" || mode == "later" else { return }
-        let applyFrame = {
-            self.bottomConstraint.constant = -height
-            let duration = info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
-            let curve = info[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 0
-            UIView.animate(withDuration: duration, delay: 0,
-                           options: [.beginFromCurrentState, UIView.AnimationOptions(rawValue: curve << 16)]) {
-                self.view.layoutIfNeeded()
-            }
-        }
-        if mode == "later" {
-            keyboardFrameRevision += 1
-            let revision = keyboardFrameRevision
-            DispatchQueue.main.async {
-                if self.keyboardFrameRevision == revision { applyFrame() }
-            }
-        } else {
-            applyFrame()
+        guard mode == "notification", bottomConstraint.constant != -height else { return }
+
+        bottomConstraint.constant = -height
+        let duration = info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+        let curve = info[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 0
+        UIView.animate(withDuration: duration, delay: 0,
+                       options: [.beginFromCurrentState, UIView.AnimationOptions(rawValue: curve << 16)]) {
+            self.view.layoutIfNeeded()
         }
     }
 
@@ -110,20 +101,6 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     }
 
     private func measure() async throws -> [String: Any] {
-        if mode == "overlay" {
-            _ = try await web.evaluateJavaScript("""
-                (() => {
-                    const fit = () => {
-                        const gap = document.documentElement.clientHeight - visualViewport.height - visualViewport.offsetTop;
-                        document.querySelector('main').style.paddingBottom = Math.max(0, gap) + 'px';
-                    };
-                    visualViewport.addEventListener('resize', fit);
-                    visualViewport.addEventListener('scroll', fit);
-                    fit();
-                    return true;
-                })()
-                """)
-        }
         var cycles: [[String: Any]] = []
         for (index, mode) in ["short", "wrapped", "wrapped"].enumerated() {
             _ = try await web.evaluateJavaScript("prepare('\(mode)')")

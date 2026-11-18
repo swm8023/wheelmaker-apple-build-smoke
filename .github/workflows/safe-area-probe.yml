@@ -1,4 +1,4 @@
-name: Compare keyboard frame notifications and WebView overlay
+name: Verify repeated iPhone keyboard frame changes
 on:
   push:
     branches: [test/ios-chat-keyboard-anchor-probe]
@@ -54,7 +54,7 @@ jobs:
           xcrun simctl install "$device" "$RUNNER_TEMP/SafeAreaProbe.app"
           data="$(xcrun simctl get_app_container "$device" "$bundle" data)"
           result="$data/Documents/result.json"
-          for mode in guide notification later overlay; do
+          for mode in guide notification; do
             rm -f "$result"
             SIMCTL_CHILD_PROBE_BOTTOM_ANCHOR="$mode" xcrun simctl launch --terminate-running-process "$device" "$bundle"
             for attempt in $(seq 1 80); do
@@ -69,17 +69,26 @@ jobs:
           mode = sys.argv[1]
           report = json.loads(Path(sys.argv[2]).read_text())
           print("ANCHOR_RESULT " + json.dumps({"mode": mode, **report}, sort_keys=True), flush=True)
-          if "error" in report:
-              print(f'{mode} failed to complete the keyboard cycle: {report["error"]}', flush=True)
-          else:
-              first = report["cycles"][0]["before"]
-              for cycle in report["cycles"]:
-                  opened, closed = [cycle[phase] for phase in ("open", "settled")]
-                  assert opened["page"]["editorFocused"] and not closed["page"]["editorFocused"], cycle
-                  assert first["page"]["visualHeight"] - opened["page"]["visualHeight"] > 150, cycle
-                  print(f'{mode} cycle {cycle["cycle"]}: view {opened["webHeight"]}/{closed["webHeight"]}, '
-                        f'visible {opened["page"]["visualHeight"]}/{closed["page"]["visualHeight"]}, '
-                        f'gap {opened["page"]["editorGapToVisualBottom"]}/{closed["page"]["editorGapToVisualBottom"]}, '
-                        f'bottom {first["webBottom"]}/{closed["webBottom"]}', flush=True)
+          assert "error" not in report, report
+          cycles = report["cycles"]
+          assert len(cycles) == 3, report
+          first = cycles[0]["before"]
+          initial_gap = first["page"]["editorGapToVisualBottom"]
+          assert abs(first["windowHeight"] - first["webBottom"] - first["windowSafeBottom"]) < 1
+          assert initial_gap == 6, first
+          for cycle in cycles:
+              opened, closed = cycle["open"], cycle["settled"]
+              assert opened["page"]["editorFocused"] and not closed["page"]["editorFocused"], cycle
+              assert first["webHeight"] - opened["webHeight"] > 150, cycle
+              assert abs(opened["page"]["visualHeight"] - opened["webHeight"]) < 1, cycle
+              assert abs(opened["page"]["editorGapToVisualBottom"] - initial_gap) < 1, cycle
+              if mode == "notification":
+                  assert abs(first["webBottom"] - closed["webBottom"]) < 1, cycle
+                  assert abs(first["webHeight"] - closed["webHeight"]) < 1, cycle
+              else:
+                  assert abs(first["webBottom"] - closed["webBottom"] - first["windowSafeBottom"]) < 1, cycle
+              assert abs(closed["page"]["editorGapToVisualBottom"] - initial_gap) < 1, cycle
+              print(f'{mode} cycle {cycle["cycle"]}: height {opened["webHeight"]}/{closed["webHeight"]}, '
+                    f'gap {opened["page"]["editorGapToVisualBottom"]}/{closed["page"]["editorGapToVisualBottom"]}', flush=True)
           PY
           done
