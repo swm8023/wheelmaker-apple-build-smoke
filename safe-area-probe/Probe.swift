@@ -41,7 +41,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             top,
             bottom,
             web.topAnchor.constraint(greaterThanOrEqualTo: view.topAnchor),
-            web.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: 4),
+            web.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: 16),
             bottomConstraint,
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),

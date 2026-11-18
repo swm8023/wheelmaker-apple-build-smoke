@@ -1,4 +1,4 @@
-name: Verify iPhone native inset and keyboard recovery
+name: Verify lower iPhone workspace and keyboard recovery
 on:
   push:
     branches: [test/ios-chat-keyboard-anchor-probe]
@@ -74,10 +74,10 @@ jobs:
           assert len(cycles) == 3, report
           first = cycles[0]["before"]
           assert abs(first["webTop"] - max(0, first["windowSafeTop"] - 4)) < 1, first
-          resting_bottom = first["windowHeight"] - max(0, first["windowSafeBottom"] - 4)
+          resting_bottom = first["windowHeight"] - max(0, first["windowSafeBottom"] - 16)
           assert abs(first["webBottom"] - resting_bottom) < 1, first
           assert first["webTop"] + first["page"]["headerContentTop"] >= first["windowSafeTop"], first
-          assert first["webTop"] + first["page"]["editorBottom"] <= first["windowHeight"] - first["windowSafeBottom"], first
+          assert abs(first["webTop"] + first["page"]["editorBottom"] - (resting_bottom - 6)) < 1, first
           initial_gap = first["page"]["editorGapToVisualBottom"]
           assert initial_gap == 6, first
           for cycle in cycles:
