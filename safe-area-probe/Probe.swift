@@ -59,6 +59,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
                 let result = try await measure()
                 let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
                 try data.write(to: destination, options: .atomic)
+                _ = try await web.evaluateJavaScript("document.querySelector('header').textContent = 'Measurements ready'")
             } catch {
                 let data = try? JSONSerialization.data(withJSONObject: ["error": String(describing: error)])
                 try? data?.write(to: destination, options: .atomic)
@@ -68,19 +69,18 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
 
     private func measure() async throws -> [String: Any] {
         var cycles: [[String: Any]] = []
-        for (index, mode) in ["short", "wrapped", "wrapped"].enumerated() {
+        for (index, mode) in ["short", "wrapped"].enumerated() {
             _ = try await web.evaluateJavaScript("prepare('\(mode)')")
             try await Task.sleep(for: .milliseconds(200))
             let before = try await snapshot()
 
             let previousShowCount = shown
-            _ = try await web.evaluateJavaScript("startEditing()")
+            let previousHideCount = hidden
+            _ = try await web.evaluateJavaScript("document.querySelector('header').textContent = 'Ready \(index + 1)'")
             try await waitForKeyboard("show") { shown > previousShowCount }
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .milliseconds(200))
             let open = try await snapshot()
 
-            let previousHideCount = hidden
-            _ = try await web.evaluateJavaScript("document.getElementById('editor').blur(); true")
             try await waitForKeyboard("hide") { hidden > previousHideCount }
             let dismissed = try await snapshot()
             try await Task.sleep(for: .seconds(1))
@@ -92,7 +92,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     }
 
     private func waitForKeyboard(_ event: String, until condition: () -> Bool) async throws {
-        for _ in 0..<60 {
+        for _ in 0..<200 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(100))
         }
@@ -161,11 +161,6 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             : 'This longer sample draft wraps onto multiple lines in a narrow chat composer. '.repeat(6);
           messages.scrollTop = messages.scrollHeight;
           return true;
-        }
-        function startEditing() {
-          editor.focus();
-          window.getSelection().collapse(editor.lastChild, editor.lastChild.length);
-          return document.activeElement === editor;
         }
         function geometry() {
           const box = editor.getBoundingClientRect();
