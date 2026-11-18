@@ -2,13 +2,13 @@ import SwiftUI
 import UIKit
 import WebKit
 
-private let nativeOwnsBottomInset = ProcessInfo.processInfo.environment["PROBE_BOTTOM_ANCHOR"] == "native"
+private let mode = ProcessInfo.processInfo.environment["PROBE_BOTTOM_ANCHOR"] ?? "guide"
 
 @main
 struct KeyboardProbe: App {
     var body: some Scene {
         WindowGroup {
-            ProbeView().ignoresSafeArea(nativeOwnsBottomInset ? .all : .keyboard, edges: .bottom)
+            ProbeView().ignoresSafeArea(.keyboard, edges: .bottom)
         }
     }
 }
@@ -21,6 +21,9 @@ private struct ProbeView: UIViewControllerRepresentable {
 @MainActor
 private final class ProbeController: UIViewController, WKNavigationDelegate {
     private let web = WKWebView(frame: .zero)
+    private var bottomConstraint: NSLayoutConstraint!
+    private var keyboardFrameRevision = 0
+    private var frameEvents: [[String: Any]] = []
     private var shown = 0
     private var hidden = 0
 
@@ -33,13 +36,16 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
         view.addSubview(web)
 
         let guide = view.keyboardLayoutGuide
-        guide.usesBottomSafeArea = nativeOwnsBottomInset
+        guide.usesBottomSafeArea = false
+        bottomConstraint = web.bottomAnchor.constraint(equalTo: mode == "guide" ? guide.topAnchor : view.bottomAnchor)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.topAnchor),
-            web.bottomAnchor.constraint(equalTo: guide.topAnchor),
+            bottomConstraint,
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardFrameWillChange(_:)),
+                                               name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardShown(_:)),
                                                name: UIResponder.keyboardDidShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardHidden(_:)),
@@ -52,7 +58,42 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     }
 
     @objc private func keyboardShown(_ notification: Notification) { shown += 1 }
-    @objc private func keyboardHidden(_ notification: Notification) { hidden += 1 }
+    @objc private func keyboardHidden(_ notification: Notification) {
+        hidden += 1
+        if mode == "notification" || mode == "later" {
+            keyboardFrameRevision += 1
+            bottomConstraint.constant = 0
+        }
+    }
+
+    @objc private func keyboardFrameWillChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let screen = notification.object as? UIScreen,
+              let frame = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        let keyboard = screen.coordinateSpace.convert(frame, to: view)
+        let overlap = view.bounds.intersection(keyboard)
+        let height = !overlap.isEmpty && keyboard.maxY >= view.bounds.maxY ? overlap.height : 0
+        frameEvents.append(["screenY": frame.minY, "overlap": height])
+        guard mode == "notification" || mode == "later" else { return }
+        let applyFrame = {
+            self.bottomConstraint.constant = -height
+            let duration = info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+            let curve = info[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 0
+            UIView.animate(withDuration: duration, delay: 0,
+                           options: [.beginFromCurrentState, UIView.AnimationOptions(rawValue: curve << 16)]) {
+                self.view.layoutIfNeeded()
+            }
+        }
+        if mode == "later" {
+            keyboardFrameRevision += 1
+            let revision = keyboardFrameRevision
+            DispatchQueue.main.async {
+                if self.keyboardFrameRevision == revision { applyFrame() }
+            }
+        } else {
+            applyFrame()
+        }
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
@@ -69,6 +110,20 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
     }
 
     private func measure() async throws -> [String: Any] {
+        if mode == "overlay" {
+            _ = try await web.evaluateJavaScript("""
+                (() => {
+                    const fit = () => {
+                        const gap = document.documentElement.clientHeight - visualViewport.height - visualViewport.offsetTop;
+                        document.querySelector('main').style.paddingBottom = Math.max(0, gap) + 'px';
+                    };
+                    visualViewport.addEventListener('resize', fit);
+                    visualViewport.addEventListener('scroll', fit);
+                    fit();
+                    return true;
+                })()
+                """)
+        }
         var cycles: [[String: Any]] = []
         for (index, mode) in ["short", "wrapped", "wrapped"].enumerated() {
             _ = try await web.evaluateJavaScript("prepare('\(mode)')")
@@ -90,7 +145,7 @@ private final class ProbeController: UIViewController, WKNavigationDelegate {
             cycles.append(["cycle": index + 1, "mode": mode, "before": before,
                            "open": open, "dismissed": dismissed, "settled": settled])
         }
-        return ["iOS": UIDevice.current.systemVersion, "cycles": cycles]
+        return ["iOS": UIDevice.current.systemVersion, "cycles": cycles, "frameEvents": frameEvents]
     }
 
     private func waitForKeyboard(_ event: String, until condition: () -> Bool) async throws {
