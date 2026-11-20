@@ -7,7 +7,13 @@ permissions:
 jobs:
   capture:
     runs-on: macos-15
-    timeout-minutes: 18
+    timeout-minutes: 22
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [published, aligned]
+    env:
+      WIDGET_VERSION: ${{ matrix.version }}
     environment: ios-island-alignment-178358b7
     steps:
       - name: Prepare screenshot fixture
@@ -21,7 +27,11 @@ jobs:
           printf '%s' "$PREVIEW_INPUT" | base64 -D | tar -xz
           unset PREVIEW_INPUT
           mkdir Host Widget UITests
-          mv SessionActivityWidget.swift Widget/
+          if [[ "$WIDGET_VERSION" == published ]]; then
+            mv BaselineSessionActivityWidget.swift Widget/SessionActivityWidget.swift
+          else
+            mv SessionActivityWidget.swift Widget/
+          fi
           mv SessionActivityAttributes.swift Host/
           cat > Host/Launch.swift <<'SWIFT'
           import ActivityKit
@@ -88,7 +98,7 @@ jobs:
           
                   XCUIDevice.shared.press(.home)
                   XCTAssertTrue(springboard.wait(for: .runningForeground, timeout: 15))
-                  Thread.sleep(forTimeInterval: 2)
+                  Thread.sleep(forTimeInterval: 15)
                   save("island-compact")
           
                   app.activate()
@@ -96,10 +106,10 @@ jobs:
                   XCTAssertTrue(app.staticTexts["All states shown"].waitForExistence(timeout: 15))
                   XCUIDevice.shared.press(.home)
                   XCTAssertTrue(springboard.wait(for: .runningForeground, timeout: 15))
-                  Thread.sleep(forTimeInterval: 2)
+                  Thread.sleep(forTimeInterval: 15)
                   save("island-compact-attention")
                   springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.044)).press(forDuration: 1.25)
-                  Thread.sleep(forTimeInterval: 1)
+                  Thread.sleep(forTimeInterval: 10)
                   save("island-expanded")
               }
           
@@ -130,6 +140,8 @@ jobs:
                 path: Host/Info.plist
                 properties:
                   NSSupportsLiveActivities: true
+                  CFBundleURLTypes:
+                    - CFBundleURLSchemes: [wheelmaker-session]
                   UILaunchScreen: {}
               settings:
                 base:
@@ -211,11 +223,14 @@ jobs:
               assert len(found) == 1, (variant, found)
               shutil.copyfile(exported / found[0], Path("captures") / (variant + ".png"))
           PY
+          xcrun simctl spawn "$device" log show --last 15m --style compact --info \
+            --predicate 'process == "WheelMakerSessionActivity" OR process == "liveactivitiesd" OR subsystem BEGINSWITH "com.apple.WidgetKit"' > widget-render.log || true
+          cp widget-render.log captures/
           tar -czf capture.tar.gz -C captures .
           openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:capture.key -in capture.tar.gz -out screenshot.enc
       - name: Upload encrypted screenshots
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: island-screenshots
+          name: island-screenshots-${{ matrix.version }}
           path: ${{ runner.temp }}/preview/screenshot.enc
           retention-days: 1
