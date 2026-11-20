@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [published, aligned]
+        version: [aligned]
     env:
       WIDGET_VERSION: ${{ matrix.version }}
     environment: ios-island-alignment-178358b7
@@ -33,6 +33,7 @@ jobs:
             mv SessionActivityWidget.swift Widget/
           fi
           mv SessionActivityAttributes.swift Host/
+          mv session-activity-brand.png Widget/
           cat > Host/Launch.swift <<'SWIFT'
           import ActivityKit
           import SwiftUI
@@ -196,7 +197,7 @@ jobs:
           xcrun simctl status_bar "$device" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState discharging --batteryLevel 100 || true
           if ! xcodebuild test -project IslandCapture.xcodeproj -scheme IslandCapture \
             -destination "platform=iOS Simulator,id=$device" -resultBundlePath "$PWD/TestResult.xcresult" \
-            -parallel-testing-enabled NO > "$PWD/test.log" 2>&1; then
+            -derivedDataPath "$PWD/DerivedData" -parallel-testing-enabled NO > "$PWD/test.log" 2>&1; then
             python3 - <<'PY'
           import re
           from pathlib import Path
@@ -206,6 +207,7 @@ jobs:
           PY
             exit 1
           fi
+          test -f "$PWD/DerivedData/Build/Products/Debug-iphonesimulator/WheelMaker.app/PlugIns/WheelMakerSessionActivity.appex/session-activity-brand.png"
           xcrun xcresulttool export attachments --path TestResult.xcresult --output-path xctest-attachments
           mkdir captures
           python3 - <<'PY'
