@@ -1,0 +1,221 @@
+name: Capture WheelMaker Live Activity on iOS Simulator
+on:
+  push:
+    branches: [preview/ios-island-alignment-178358b7]
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: macos-15
+    timeout-minutes: 18
+    environment: ios-island-alignment-178358b7
+    steps:
+      - name: Prepare screenshot fixture
+        env:
+          PREVIEW_INPUT: ${{ secrets.WM_PREVIEW_INPUT }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir "$RUNNER_TEMP/preview"
+          cd "$RUNNER_TEMP/preview"
+          printf '%s' "$PREVIEW_INPUT" | base64 -D | tar -xz
+          unset PREVIEW_INPUT
+          mkdir Host Widget UITests
+          mv SessionActivityWidget.swift Widget/
+          mv SessionActivityAttributes.swift Host/
+          cat > Host/Launch.swift <<'SWIFT'
+          import ActivityKit
+          import SwiftUI
+          
+          @main
+          struct PreviewApp: App {
+              @Environment(\.scenePhase) private var phase
+              @State private var activity: Activity<SessionActivityAttributes>?
+              @State private var status = "Preparing Live Activity"
+          
+              var body: some Scene {
+                  WindowGroup {
+                      VStack {
+                          Text(status)
+                          if let activity {
+                              Button("Show all states") {
+                                  Task {
+                                      await activity.update(.init(state: allStates, staleDate: nil))
+                                      status = "All states shown"
+                                  }
+                              }
+                          }
+                      }
+                      .preferredColorScheme(.dark)
+                      .task(id: phase) {
+                          guard phase == .active, activity == nil else { return }
+                          do {
+                              let running = SessionActivityAttributes.ContentState(
+                                  attention: 0, running: 1, completed: 0, failed: 0, locale: "zh-CN",
+                                  sessions: [.init(projectId: "sample", sessionId: "build", title: "检查构建", state: .running)]
+                              )
+                              activity = try Activity.request(
+                                  attributes: SessionActivityAttributes(workspace: "simulator"),
+                                  content: .init(state: running, staleDate: nil)
+                              )
+                              status = "Live Activity started"
+                          } catch {
+                              status = "Live Activity request failed"
+                          }
+                      }
+                  }
+              }
+          
+              private var allStates: SessionActivityAttributes.ContentState {
+                  .init(attention: 1, running: 1, completed: 1, failed: 1, locale: "zh-CN", sessions: [
+                      .init(projectId: "sample", sessionId: "review", title: "确认变更", state: .attention),
+                      .init(projectId: "sample", sessionId: "retry", title: "同步依赖", state: .failed),
+                      .init(projectId: "sample", sessionId: "docs", title: "更新文档", state: .completed),
+                      .init(projectId: "sample", sessionId: "build", title: "检查构建", state: .running),
+                  ])
+              }
+          }
+          SWIFT
+          cat > UITests/Capture.swift <<'SWIFT'
+          import XCTest
+          
+          final class Capture: XCTestCase {
+              func testCaptureLiveActivity() throws {
+                  let app = XCUIApplication(bundleIdentifier: "com.wheelmaker.ios")
+                  let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                  app.launch()
+                  XCTAssertTrue(app.staticTexts["Live Activity started"].waitForExistence(timeout: 25))
+          
+                  XCUIDevice.shared.press(.home)
+                  XCTAssertTrue(springboard.wait(for: .runningForeground, timeout: 15))
+                  Thread.sleep(forTimeInterval: 2)
+                  save("island-compact")
+          
+                  app.activate()
+                  app.buttons["Show all states"].tap()
+                  XCTAssertTrue(app.staticTexts["All states shown"].waitForExistence(timeout: 15))
+                  XCUIDevice.shared.press(.home)
+                  XCTAssertTrue(springboard.wait(for: .runningForeground, timeout: 15))
+                  Thread.sleep(forTimeInterval: 2)
+                  save("island-compact-attention")
+                  springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.044)).press(forDuration: 1.25)
+                  Thread.sleep(forTimeInterval: 1)
+                  save("island-expanded")
+              }
+          
+              private func save(_ name: String) {
+                  let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                  attachment.name = name
+                  attachment.lifetime = .keepAlways
+                  add(attachment)
+              }
+          }
+          SWIFT
+          cat > project.yml <<'XCODEGEN'
+          name: IslandCapture
+          options:
+            deploymentTarget:
+              iOS: "17.0"
+          settings:
+            base:
+              SWIFT_VERSION: "5.0"
+              TARGETED_DEVICE_FAMILY: "1"
+          targets:
+            WheelMaker:
+              type: application
+              platform: iOS
+              sources:
+                - Host
+              info:
+                path: Host/Info.plist
+                properties:
+                  NSSupportsLiveActivities: true
+                  UILaunchScreen: {}
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.wheelmaker.ios
+              dependencies:
+                - target: WheelMakerSessionActivity
+                  embed: true
+            WheelMakerSessionActivity:
+              type: app-extension
+              platform: iOS
+              sources:
+                - Widget
+                - Host/SessionActivityAttributes.swift
+              info:
+                path: Widget/Info.plist
+                properties:
+                  NSExtension:
+                    NSExtensionPointIdentifier: com.apple.widgetkit-extension
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.wheelmaker.ios.session-activity
+                  APPLICATION_EXTENSION_API_ONLY: YES
+            CaptureUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources: [UITests]
+              settings:
+                base:
+                  GENERATE_INFOPLIST_FILE: YES
+                  PRODUCT_BUNDLE_IDENTIFIER: com.wheelmaker.ios.capture
+              dependencies:
+                - target: WheelMaker
+          schemes:
+            IslandCapture:
+              build:
+                targets:
+                  WheelMaker: all
+                  CaptureUITests: [test]
+              test:
+                parallelizeBuild: false
+                targets: [CaptureUITests]
+          XCODEGEN
+      - name: Capture the compact and expanded island
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/preview"
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate
+          device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for _,ds in reversed(list(json.load(sys.stdin)["devices"].items())) for d in ds if d["name"] == "iPhone 17 Pro" and d["isAvailable"]))')"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl status_bar "$device" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState discharging --batteryLevel 100 || true
+          if ! xcodebuild test -project IslandCapture.xcodeproj -scheme IslandCapture \
+            -destination "platform=iOS Simulator,id=$device" -resultBundlePath "$PWD/TestResult.xcresult" \
+            -parallel-testing-enabled NO > "$PWD/test.log" 2>&1; then
+            python3 - <<'PY'
+          import re
+          from pathlib import Path
+          for line in Path("test.log").read_text(errors="replace").splitlines():
+              if "error:" in line or "failed" in line or "** TEST" in line:
+                  print(re.sub(r"/Users/runner/[^ :]+", "<fixture>", line)[-350:])
+          PY
+            exit 1
+          fi
+          xcrun xcresulttool export attachments --path TestResult.xcresult --output-path xctest-attachments
+          mkdir captures
+          python3 - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+          exported = Path("xctest-attachments")
+          manifest = json.loads((exported / "manifest.json").read_text())
+          for variant in ("island-compact", "island-compact-attention", "island-expanded"):
+              found = [
+                  entry["exportedFileName"]
+                  for test in manifest for entry in test["attachments"]
+                  if variant in entry.get("suggestedHumanReadableName", "") and not (variant == "island-compact" and "island-compact-attention" in entry.get("suggestedHumanReadableName", ""))
+              ]
+              assert len(found) == 1, (variant, found)
+              shutil.copyfile(exported / found[0], Path("captures") / (variant + ".png"))
+          PY
+          tar -czf capture.tar.gz -C captures .
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:capture.key -in capture.tar.gz -out screenshot.enc
+      - name: Upload encrypted screenshots
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: island-screenshots
+          path: ${{ runner.temp }}/preview/screenshot.enc
+          retention-days: 1
